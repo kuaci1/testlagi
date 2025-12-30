@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # =====================
+  # Redis Cache Service
+  # =====================
+  redis:
+    image: redis:7-alpine
+    container_name: scalable-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - scalable-net
+
+  # =====================
+  # Backend Services (Scalable)
+  # =====================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scalable-backend:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - scalable-net
+    # Resource limits (untuk demo)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # =====================
+  # Nginx Load Balancer
+  # =====================
+  nginx:
+    image: nginx:alpine
+    container_name: scalable-nginx
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_logs:/var/log/nginx
+    restart: unless-stopped
+    networks:
+      - scalable-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+# =====================
+  # Volumes
+# =====================
+volumes:
+  redis_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# =====================
+  # Networks
+# =====================
+networks:
+  scalable-net:
+    driver: bridge
+
+# =====================
+# Deployment notes:
+# =====================
+# 1. Start dengan 3 backend instances:
+#    docker-compose up --scale backend=3
+#
+# 2. Cek status:
+#    docker-compose ps
+#
+# 3. Cek logs:
+#    docker-compose logs -f backend
+#    docker-compose logs -f nginx
+#
+# 4. Scale up/down:
+#    docker-compose up --scale backend=5    # Scale ke 5 instances
+#    docker-compose up --scale backend=2    # Scale ke 2 instances
+#
+# 5. Stop semua services:
+#    docker-compose down
+#
+# 6. Stop dan hapus volumes:
+#    docker-compose down -v
